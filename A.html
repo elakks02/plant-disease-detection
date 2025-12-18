@@ -1,0 +1,218 @@
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Uzhavar Connect - Plantix Style Translator & Farming Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Roboto&display=swap"
+    rel="stylesheet"
+  />
+</head>
+<body class="bg-gray-50 font-['Roboto'] min-h-screen flex flex-col p-4">
+  <h1 class="text-3xl font-bold text-indigo-700 mb-6 flex items-center">
+    <i class="fas fa-leaf mr-3"></i> Uzhavar Connect - Plantix Style Translator & Farming Assistant
+  </h1>
+
+  <pre style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:0.375rem; padding:1rem; overflow-x:auto; font-family:monospace; font-size:14px;">
+import streamlit as st
+from streamlit_option_menu import option_menu
+from ultralytics import YOLO
+from PIL import Image
+import json, os, requests
+from io import BytesIO
+import tempfile
+from gtts import gTTS
+
+# ----------- Utils (from your utils.py & chatbot.py assumed) -----------
+from utils import get_organic_solution, generate_report
+from chatbot import plant_chatbot
+
+# Load trained YOLOv8 model
+MODEL_PATH = "runs/detect/train2/weights/best.pt"
+model = YOLO(MODEL_PATH)
+
+# ---------------- SIDEBAR MENU ----------------
+with st.sidebar:
+    selected = option_menu(
+        menu_title="🌱 Uzhavar Connect",
+        options=["Home", "Prediction", "Chatbot", "Weather", "Crop Advisory", "Community Q&A", "History", "About", "Translator"],
+        icons=["house", "camera", "chat-dots", "cloud-sun", "leaf", "people", "clock-history", "info-circle", "language"],
+        menu_icon="leaf",
+        default_index=0,
+    )
+
+# ---------------- HOME ---------------- #
+if selected == "Home":
+    st.title("🌿 Plantix Clone")
+    st.write("An AI-powered assistant for farmers: detect plant diseases, get solutions, check weather, and share with community.")
+    st.image("https://cdn.pixabay.com/photo/2018/05/04/14/28/leaf-3373205_1280.jpg", use_container_width=True)
+
+# ---------------- PREDICTION ---------------- #
+elif selected == "Prediction":
+    uploaded_file = st.file_uploader("📸 Upload a leaf image", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded Image", use_container_width=True)
+        st.write("🔍 Detecting disease...")
+        results = model.predict(image)
+        disease_name = None
+        if len(results) > 0 and len(results[0].boxes) > 0:
+            top_box = results[0].boxes[0]
+            cls_id = int(top_box.cls[0])
+            disease_name = model.names[cls_id]
+            st.success(f"✅ Detected Disease: *{disease_name}*")
+            solution = get_organic_solution(disease_name)
+            st.info(f"🌱 Solution: {solution}")
+            history_file = "history.json"
+            entry = {"disease": disease_name, "solution": solution}
+            if os.path.exists(history_file):
+                with open(history_file, "r") as f:
+                    history = json.load(f)
+            else:
+                history = []
+            history.append(entry)
+            with open(history_file, "w") as f:
+                json.dump(history, f)
+            if st.button("📄 Download Report"):
+                pdf_path = generate_report(disease_name, solution)
+                with open(pdf_path, "rb") as file:
+                    st.download_button("⬇ Save Report", file, "plant_diagnosis.pdf", "application/pdf")
+        else:
+            st.warning("🎉 No disease detected. Your plant looks healthy!")
+
+# ----------------- CHATBOT -----------------
+elif selected == "Chatbot":
+    st.title("🤖 Smart Farming ChatBot")
+    st.write("Ask me about plant health, organic solutions, or farming tips.")
+    user_q = st.text_input("Type your question:")
+    if st.button("Ask"):
+        if user_q:
+            answer = plant_chatbot(user_q)
+            st.success(f"Chatbot Answer: {answer}")
+        else:
+            st.warning("Please enter a question.")
+
+# ----------------- WEATHER -----------------
+elif selected == "Weather":
+    st.title("🌦 Weather for Crop Protection")
+    st.write("Check real-time weather updates for your farm location.")
+    city = st.text_input("🏙 Enter your city:")
+    def get_weather(city):
+        try:
+            url = f"https://wttr.in/{city}?format=j1"
+            res = requests.get(url, timeout=5)
+            if res.status_code == 200:
+                return res.json()
+            else:
+                return None
+        except:
+            return None
+    def get_weather_icon(condition):
+        condition = condition.lower()
+        if "rain" in condition:
+            return "🌧", "https://cdn-icons-png.flaticon.com/512/1163/1163624.png"
+        elif "sun" in condition or "clear" in condition:
+            return "☀", "https://cdn-icons-png.flaticon.com/512/869/869869.png"
+        elif "cloud" in condition:
+            return "☁", "https://cdn-icons-png.flaticon.com/512/1163/1163629.png"
+        elif "snow" in condition:
+            return "❄", "https://cdn-icons-png.flaticon.com/512/642/642102.png"
+        else:
+            return "🌍", "https://cdn-icons-png.flaticon.com/512/414/414825.png"
+    if city:
+        weather_data = get_weather(city)
+        if weather_data:
+            try:
+                current = weather_data['current_condition'][0]
+                temp = current['temp_C']
+                feels_like = current['FeelsLikeC']
+                desc = current['weatherDesc'][0]['value']
+                humidity = current['humidity']
+                wind = current['windspeedKmph']
+                emoji, icon_url = get_weather_icon(desc)
+                st.subheader(f"{emoji} Weather in {city.title()}")
+                st.image(icon_url, width=100)
+                st.success(
+                    f"""
+                    🌡 *Temperature:* {temp}°C (Feels like {feels_like}°C)  
+                    🌤 *Condition:* {desc}  
+                    💧 *Humidity:* {humidity}%  
+                    💨 *Wind:* {wind} km/h  
+                    """
+                )
+                area = weather_data['nearest_area'][0]
+                lat = area['latitude']
+                lon = area['longitude']
+                map_url = f"https://static-maps.yandex.ru/1.x/?ll={lon},{lat}&spn=0.3,0.3&l=map&pt={lon},{lat},pm2rdm"
+                map_res = requests.get(map_url)
+                if map_res.status_code == 200:
+                    st.image(Image.open(BytesIO(map_res.content)), caption=f"🗺 Map of {city.title()}")
+            except Exception as e:
+                st.error("⚠ Could not parse weather data. API may have changed.")
+                st.write(weather_data)
+        else:
+            st.error("⚠ Could not fetch weather. Check city name or internet.")
+
+# -------------- TRANSLATOR -----------------
+elif selected == "Translator":
+    st.title("🌐 English to Tamil/Telugu/Kannada/Malayalam Translator (Plantix Style)")
+    st.write("Translate English text to Tamil, Telugu, Kannada, or Malayalam and listen to the translation.")
+
+    import requests
+    import tempfile
+    from gtts import gTTS
+
+    south_indian_langs = {
+        "Tamil": "ta",
+        "Telugu": "te",
+        "Kannada": "kn",
+        "Malayalam": "ml"
+    }
+
+    target_lang = st.selectbox("Select target language", options=list(south_indian_langs.keys()))
+    text_to_translate = st.text_area("Enter text in English")
+
+    if st.button("Translate and Listen"):
+        if not text_to_translate.strip():
+            st.warning("Please enter text to translate.")
+        else:
+            try:
+                # Use LibreTranslate public API (free, no key required)
+                translate_url = "https://libretranslate.de/translate"
+                payload = {
+                    "q": text_to_translate,
+                    "source": "en",
+                    "target": south_indian_langs[target_lang],
+                    "format": "text"
+                }
+                headers = {"Content-Type": "application/json"}
+                response = requests.post(translate_url, json=payload, headers=headers, timeout=10)
+                response.raise_for_status()
+                translated_text = response.json().get("translatedText", "")
+
+                st.success("Translation Result:")
+                st.write(translated_text)
+
+                # Text-to-Speech with gTTS
+                tts = gTTS(text=translated_text, lang=south_indian_langs[target_lang])
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+                    tts.save(tmp_file.name)
+                    audio_file = tmp_file.name
+
+                audio_bytes = open(audio_file, "rb").read()
+                st.audio(audio_bytes, format="audio/mp3")
+
+                os.remove(audio_file)
+
+            except requests.exceptions.JSONDecodeError:
+                st.error("⚠ Translation API returned invalid response. Please try again later.")
+            except Exception as e:
+                st.error(f"⚠ Translation or Text-to-Speech failed: {e}")
+</pre>
+</body>
+</html>
